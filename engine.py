@@ -6,6 +6,7 @@ import requests
 from lxml import etree
 import xml.etree.ElementTree as ET
 import ebooklib
+import abc
 from ebooklib import epub
 import pathlib
 
@@ -22,11 +23,13 @@ class BasicChapterConverter:
 
     def __init__(self, config: ConverterConfig = ConverterConfig()):
         self.config = config
-        self.markdown_converter: Markdown = Markdown()
+        self.markdown_converter: Markdown = Markdown(extras=['metadata'])
         pass
 
     def _convert_md_to_html(self, md_str: str) -> (str, ChapterMeta):
         html = self.markdown_converter.convert(md_str)
+        if html.metadata is None:
+            html.metadata = {}
         return html, ChapterMeta(**html.metadata)
 
     def convert_from_path(self, path: pathlib.Path) -> (str, ChapterMeta):
@@ -47,20 +50,11 @@ class EPUBConverter:
 
     def __init__(self, config: ConverterConfig):
         self.config = config
-        self.chapter_converter = BasicChapterConverter(self.config)
-        self.md_path: Optional[pathlib.Path] = None
         self.epub_book = epub.EpubBook()
         self.section_dict: dict[str, SectionDict] = {
             'default': SectionDict(section_name='default', section_order=0, section_content={})
         }
-
-    def set_md_path(self, path: pathlib.Path) -> 'EPUBConverter':
-        if not path.exists():
-            raise ValueError("Path not exists")
-        if not path.is_dir():
-            raise ValueError("Path is not a directory")
-        self.md_path = path
-        return self
+        self.total_chapter_count = 1
 
     def set_style(self, style: str) -> 'EPUBConverter':
         self.config.style = style
@@ -101,13 +95,124 @@ class EPUBConverter:
         return self
 
     def add_chapter(self, section_name: str, chapter_content: str, chapter_meta: ChapterMeta) -> 'EPUBConverter':
+        self.total_chapter_count += 1
         if section_name == '':
             section_name = 'default'
         if section_name not in self.section_dict:
             self.add_section(section_name, len(self.section_dict))
-        new_chapter = epub.EpubHtml(title=chapter_meta.chapter_name, file_name=chapter_meta.chapter_name, lang=self.config.lang)
+        new_chapter = epub.EpubHtml(title=chapter_meta.chapter_name, file_name=f'{chapter_meta.chapter_name}.xhtml', lang=self.config.lang, )
+        chapter_content = self.process_html(chapter_content)
         new_chapter.set_content(chapter_content)
-        self.section_dict[section_name].section_content.append(new_chapter)
+        self.section_dict[section_name].section_content[chapter_meta.chapter_order] = new_chapter
         return self
 
+    @abc.abstractmethod
+    def convert(self) -> epub.EpubBook:
+        pass
+
+    def process_html(self, html: str) -> str:
+        html = "<html><body>" + html + "</body></html>"
+        root = ET.fromstring(html)
+        try:
+            return ET.tostring(self.download_image(root), encoding='utf-8')
+        except Exception as e:
+            print(e)
+            return html
+
+    def download_image(self, root: etree.Element) -> etree.Element:
+        for img in root.findall('.//img'):
+            img_url = img.get('src')
+            if img_url is not None:
+                img_url = img_url.strip()
+                if img_url.startswith('http'):
+                    img_data = requests.get(img_url, headers=config.download_headers).content
+                    img_name = img_url.split('/')[-1]
+                    self.epub_book.add_item(epub.EpubItem(file_name=f"images/{img_name}", content=img_data, media_type='image/jpeg'))
+                    img.set('src', f"images/{img_name}")
+        return root
+
+
+class Markdowns2EpubConverter(EPUBConverter):
+    """
+    Markdown to EPUB converter
+    """
+
+    def __init__(self, config: ConverterConfig):
+        super(Markdowns2EpubConverter, self).__init__(config)
+        self.chapter_converter = BasicChapterConverter(self.config)
+        self.md_path: Optional[pathlib.Path] = None
+
+    def convert(self) -> 'Markdowns2EpubConverter':
+        if self.md_path is None:
+            raise ValueError("Path not set")
+        for chapter_path in self.md_path.iterdir():
+            if chapter_path.is_dir():
+                continue
+            if not chapter_path.suffix == '.md':
+                continue
+            chapter_content, chapter_meta = self.chapter_converter.convert_from_path(chapter_path)
+            if chapter_meta.chapter_name is None:
+                if chapter_meta.show_chapter_order:
+                    chapter_meta.chapter_name = f"第{self.total_chapter_count}章 {chapter_path.stem}"
+                else:
+                    chapter_meta.chapter_name = chapter_path.stem
+            if chapter_meta.chapter_order is None:
+                chapter_meta.chapter_order = self.total_chapter_count
+            if chapter_meta.section_name:
+                self.add_chapter(chapter_meta.section_name, chapter_content, chapter_meta)
+            else:
+                self.add_chapter("", chapter_content, chapter_meta)
+
+        section_list = [_ for key, _ in self.section_dict.items()]
+        section_list.sort(key=lambda x: x.section_order)
+        if len(section_list) == 1:
+            chapter_list = [(key, value) for key, value in section_list[0].section_content.items()]
+            chapter_list.sort(key=lambda x: x[0])
+            chapters = [value for _, value in chapter_list]
+            for chapter in chapters:
+                self.epub_book.add_item(chapter)
+            self.epub_book.toc = [(epub.Section('正文'), chapters)]
+            self.epub_book.spine = chapters
+        else:
+            section_list.sort(key=lambda x: x.section_order)
+            for section in section_list:
+                if len(section.section_content) == 0:
+                    continue
+                chapter_list = [(key, value) for key, value in section.section_content.items()]
+                chapter_list.sort(key=lambda x: x[0])
+                chapters = [value for _, value in chapter_list]
+                for chapter in chapters:
+                    self.epub_book.add_item(chapter)
+                self.epub_book.toc.append((epub.Section(section.section_name), chapters))
+                self.epub_book.spine.extend(chapters)
+        self.epub_book.add_item(epub.EpubNcx())
+        self.epub_book.add_item(epub.EpubNav())
+        return self
+
+    def set_md_path(self, path: pathlib.Path) -> 'EPUBConverter':
+        if not path.exists():
+            raise ValueError("Path not exists")
+        if not path.is_dir():
+            raise ValueError("Path is not a directory")
+        self.md_path = path
+        return self
+
+    def _create_book(self) -> epub.EpubBook:
+        return self.epub_book
+
+    def save_to_file(self, file_path: pathlib.Path) -> 'EPUBConverter':
+        epub.write_epub(file_path.absolute(), self.epub_book, {"epub3_pages": False})
+        return self
+
+
+if __name__ == "__main__":
+    config = ConverterConfig()
+    converter = Markdowns2EpubConverter(config)
+    converter.set_md_path(pathlib.Path('./test/'))
+    converter.set_title('Title')
+    converter.add_author('Author')
+    converter.set_description('Description')
+    converter.set_language('en')
+    converter.set_cover('cover.png', open('bg_ss01.png', 'rb').read())
+    converter.convert().save_to_file(pathlib.Path('./test.epub'))
 

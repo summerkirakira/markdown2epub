@@ -9,6 +9,10 @@ class ConverterConfig(BaseModel):
     convert_image: bool = True
     style: Optional[str] = None
     lang: Optional[str] = None
+    download_headers: dict[str, str] = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/103.0.0.0 Safari/537.36 "
+    }
 
 
 class ChapterType(enum.Enum):
@@ -17,18 +21,17 @@ class ChapterType(enum.Enum):
 
 
 class ChapterMeta(BaseModel):
-    chapter_order: int
+    section_name: Optional[str] = None
+    chapter_order: Optional[int] = None
     chapter_name: Optional[str] = None
     chapter_type: ChapterType = ChapterType.NOVEL
     show_chapter_order: bool = True
-    download_headers: dict[str, str] = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/103.0.0.0 Safari/537.36 "
-    }
 
 
 class SectionDict(BaseModel):
+    class Config:
+        arbitrary_types_allowed = True
     section_name: str
     section_order: int
-    section_content: list[epub.EpubHtml]
+    section_content: dict[int, epub.EpubHtml]
 
