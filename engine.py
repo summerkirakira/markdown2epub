@@ -94,14 +94,14 @@ class EPUBConverter:
                 self.section_dict[section_name] = SectionDict(section_name=section_name, section_order=section_order, section_content={})
         return self
 
-    def add_chapter(self, section_name: str, chapter_content: str, chapter_meta: ChapterMeta) -> 'EPUBConverter':
+    def add_chapter(self, section_name: str, chapter_content: str, chapter_meta: ChapterMeta, file_path: pathlib.Path) -> 'EPUBConverter':
         self.total_chapter_count += 1
         if section_name == '':
             section_name = 'default'
         if section_name not in self.section_dict:
             self.add_section(section_name, len(self.section_dict))
         new_chapter = epub.EpubHtml(title=chapter_meta.chapter_name, file_name=f'{chapter_meta.chapter_name}.xhtml', lang=self.config.lang, )
-        chapter_content = self.process_html(chapter_content)
+        chapter_content = self.process_html(chapter_content, file_path)
         new_chapter.set_content(chapter_content)
         self.section_dict[section_name].section_content[chapter_meta.chapter_order] = new_chapter
         return self
@@ -110,16 +110,16 @@ class EPUBConverter:
     def convert(self) -> epub.EpubBook:
         pass
 
-    def process_html(self, html: str) -> str:
+    def process_html(self, html: str, file_path: pathlib.Path) -> str:
         html = "<html><body>" + html + "</body></html>"
         root = ET.fromstring(html)
         try:
-            return ET.tostring(self.download_image(root), encoding='utf-8')
+            return ET.tostring(self.download_image(root, file_path), encoding='utf-8')
         except Exception as e:
             print(e)
             return html
 
-    def download_image(self, root: etree.Element) -> etree.Element:
+    def download_image(self, root: etree.Element, file_path: pathlib.Path) -> etree.Element:
         for img in root.findall('.//img'):
             img_url = img.get('src')
             if img_url is not None:
@@ -129,6 +129,15 @@ class EPUBConverter:
                     img_name = img_url.split('/')[-1]
                     self.epub_book.add_item(epub.EpubItem(file_name=f"images/{img_name}", content=img_data, media_type='image/jpeg'))
                     img.set('src', f"images/{img_name}")
+                else:
+                    img_path = file_path / pathlib.Path(img.get('src'))
+                    if img_path.exists():
+                        img_data = img_path.read_bytes()
+                        img_name = img_path.name
+                        self.epub_book.add_item(epub.EpubItem(file_name=f"images/{img_name}", content=img_data, media_type='image/jpeg'))
+                        img.set('src', f"images/{img_name}")
+                    else:
+                        raise FileNotFoundError(f"Image not found: {img_path}")
         return root
 
 
@@ -143,6 +152,10 @@ class Markdowns2EpubConverter(EPUBConverter):
         self.md_path: Optional[pathlib.Path] = None
 
     def convert(self) -> 'Markdowns2EpubConverter':
+        """
+        Convert markdown to epub
+        :return:
+        """
         if self.md_path is None:
             raise ValueError("Path not set")
         for chapter_path in self.md_path.iterdir():
@@ -159,9 +172,9 @@ class Markdowns2EpubConverter(EPUBConverter):
             if chapter_meta.chapter_order is None:
                 chapter_meta.chapter_order = self.total_chapter_count
             if chapter_meta.section_name:
-                self.add_chapter(chapter_meta.section_name, chapter_content, chapter_meta)
+                self.add_chapter(chapter_meta.section_name, chapter_content, chapter_meta, chapter_path.parent)
             else:
-                self.add_chapter("", chapter_content, chapter_meta)
+                self.add_chapter("", chapter_content, chapter_meta, chapter_path.parent)
 
         section_list = [_ for key, _ in self.section_dict.items()]
         section_list.sort(key=lambda x: x.section_order)
@@ -190,6 +203,11 @@ class Markdowns2EpubConverter(EPUBConverter):
         return self
 
     def set_md_path(self, path: pathlib.Path) -> 'EPUBConverter':
+        """
+        Set markdown path
+        :param path:
+        :return:
+        """
         if not path.exists():
             raise ValueError("Path not exists")
         if not path.is_dir():
@@ -201,6 +219,11 @@ class Markdowns2EpubConverter(EPUBConverter):
         return self.epub_book
 
     def save_to_file(self, file_path: pathlib.Path) -> 'EPUBConverter':
+        """
+        Save epub to file
+        :param file_path:
+        :return:
+        """
         epub.write_epub(file_path.absolute(), self.epub_book, {"epub3_pages": False})
         return self
 
