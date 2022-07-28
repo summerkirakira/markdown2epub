@@ -1,7 +1,7 @@
 import markdown2
 from typing import Optional
 from markdown2 import Markdown
-from models import ConverterConfig, ChapterMeta
+from models import ConverterConfig, ChapterMeta, SectionDict
 import requests
 from lxml import etree
 import xml.etree.ElementTree as ET
@@ -50,6 +50,9 @@ class EPUBConverter:
         self.chapter_converter = BasicChapterConverter(self.config)
         self.md_path: Optional[pathlib.Path] = None
         self.epub_book = epub.EpubBook()
+        self.section_dict: dict[str, SectionDict] = {
+            'default': SectionDict(section_name='default', section_order=0, section_content={})
+        }
 
     def set_md_path(self, path: pathlib.Path) -> 'EPUBConverter':
         if not path.exists():
@@ -85,6 +88,26 @@ class EPUBConverter:
 
     def add_metadata(self, name: str, content: str) -> 'EPUBConverter':
         self.epub_book.add_metadata(None, 'meta', '', {'name': name, 'content': content})
+        return self
+
+    def add_section(self, section_name: str, section_order: Optional[int]) -> 'EPUBConverter':
+        if section_name == '':
+            section_name = 'default'
+        if section_name not in self.section_dict:
+            if section_order is None:
+                self.section_dict[section_name] = SectionDict(section_name=section_name, section_order=len(self.section_dict), section_content={})
+            else:
+                self.section_dict[section_name] = SectionDict(section_name=section_name, section_order=section_order, section_content={})
+        return self
+
+    def add_chapter(self, section_name: str, chapter_content: str, chapter_meta: ChapterMeta) -> 'EPUBConverter':
+        if section_name == '':
+            section_name = 'default'
+        if section_name not in self.section_dict:
+            self.add_section(section_name, len(self.section_dict))
+        new_chapter = epub.EpubHtml(title=chapter_meta.chapter_name, file_name=chapter_meta.chapter_name, lang=self.config.lang)
+        new_chapter.set_content(chapter_content)
+        self.section_dict[section_name].section_content.append(new_chapter)
         return self
 
 
