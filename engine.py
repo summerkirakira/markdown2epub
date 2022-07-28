@@ -1,11 +1,9 @@
-import markdown2
 from typing import Optional
 from markdown2 import Markdown
 from models import ConverterConfig, ChapterMeta, SectionDict
 import requests
 from lxml import etree
 import xml.etree.ElementTree as ET
-import ebooklib
 import abc
 from ebooklib import epub
 import pathlib
