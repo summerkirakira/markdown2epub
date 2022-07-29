@@ -68,7 +68,7 @@ class EPUBConverter:
         if book_meta.cover is not None:
             if book_meta.cover.startswith('http'):
                 try:
-                    self.set_cover(file_path.name, requests.get(book_meta.cover, headers=config.download_headers).content)
+                    self.set_cover(file_path.name, requests.get(book_meta.cover, headers=self.config.download_headers).content)
                 except Exception as e:
                     print(e)
             else:
@@ -163,7 +163,7 @@ class EPUBConverter:
             if img_url is not None:
                 img_url = img_url.strip()
                 if img_url.startswith('http'):
-                    img_data = requests.get(img_url, headers=config.download_headers).content
+                    img_data = requests.get(img_url, headers=self.config.download_headers).content
                     img_name = img_url.split('/')[-1]
                     self.epub_book.add_item(epub.EpubItem(file_name=f"images/{img_name}", content=img_data, media_type='image/jpeg'))
                     img.set('src', f"images/{img_name}")
@@ -273,8 +273,7 @@ class Markdowns2EpubConverter(EPUBConverter):
 
 
 if __name__ == "__main__":
-    config = ConverterConfig()
-    converter = Markdowns2EpubConverter(config)
+    converter = Markdowns2EpubConverter(ConverterConfig())
     converter.set_md_path(pathlib.Path('./test/'))
     # converter.set_title('Title')
     # converter.add_author('Author')
