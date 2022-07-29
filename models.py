@@ -22,6 +22,7 @@ class ChapterType(enum.Enum):
 
 class ChapterMeta(BaseModel):
     section_name: Optional[str] = None
+    section_order: Optional[int] = None
     chapter_order: Optional[int] = None
     chapter_name: Optional[str] = None
     chapter_type: ChapterType = ChapterType.NOVEL
@@ -34,4 +35,16 @@ class SectionDict(BaseModel):
     section_name: str
     section_order: int
     section_content: dict[int, epub.EpubHtml]
+
+
+class BookMeta(BaseModel):
+    title: str
+    author: Optional[list[str]] = None
+    description: Optional[str] = None
+    language: Optional[str] = None
+    meta: Optional[dict[str, str]] = None
+    cover: Optional[str] = None
+    publisher: Optional[str] = None
+    identifier: Optional[str] = None
+
 

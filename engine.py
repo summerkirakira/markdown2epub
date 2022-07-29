@@ -1,12 +1,13 @@
 from typing import Optional
 from markdown2 import Markdown
-from models import ConverterConfig, ChapterMeta, SectionDict
+from models import ConverterConfig, ChapterMeta, SectionDict, BookMeta
 import requests
 from lxml import etree
 import xml.etree.ElementTree as ET
 import abc
 from ebooklib import epub
 import pathlib
+import json
 
 
 class BasicChapterConverter:
@@ -54,12 +55,51 @@ class EPUBConverter:
         }
         self.total_chapter_count = 1
 
+    def load_meta_from_file(self, book_meta: BookMeta, file_path: pathlib.Path) -> 'EPUBConverter':
+        if book_meta.title is not None:
+            self.set_title(book_meta.title)
+        if book_meta.author is not None:
+            for author in book_meta.author:
+                self.add_author(author)
+        if book_meta.description is not None:
+            self.set_description(book_meta.description)
+        if book_meta.language is not None:
+            self.set_language(book_meta.language)
+        if book_meta.cover is not None:
+            if book_meta.cover.startswith('http'):
+                try:
+                    self.set_cover(file_path.name, requests.get(book_meta.cover, headers=config.download_headers).content)
+                except Exception as e:
+                    print(e)
+            else:
+                cover_path = file_path.parent / book_meta.cover
+                if cover_path.exists():
+                    self.set_cover(file_path.name, cover_path.read_bytes())
+                else:
+                    print(f'Cover {book_meta.cover} not found')
+        if book_meta.publisher is not None:
+            self.set_publisher(book_meta.publisher)
+        if book_meta.identifier is not None:
+            self.set_identifier(book_meta.identifier)
+        if book_meta.meta is not None:
+            for key, value in book_meta.meta.items():
+                self.add_metadata(key, value)
+        return self
+
     def set_style(self, style: str) -> 'EPUBConverter':
         self.config.style = style
         return self
 
     def set_title(self, title: str) -> 'EPUBConverter':
         self.epub_book.set_title(title)
+        return self
+
+    def set_publisher(self, publisher: str) -> 'EPUBConverter':
+        self.epub_book.add_metadata('DC', 'publisher', publisher)
+        return self
+
+    def set_identifier(self, identifier: str) -> 'EPUBConverter':
+        self.epub_book.set_identifier(identifier)
         return self
 
     def add_author(self, author: str) -> 'EPUBConverter':
@@ -97,7 +137,7 @@ class EPUBConverter:
         if section_name == '':
             section_name = 'default'
         if section_name not in self.section_dict:
-            self.add_section(section_name, len(self.section_dict))
+            self.add_section(section_name, chapter_meta.section_order)
         new_chapter = epub.EpubHtml(title=chapter_meta.chapter_name, file_name=f'{chapter_meta.chapter_name}.xhtml', lang=self.config.lang, )
         chapter_content = self.process_html(chapter_content, file_path)
         new_chapter.set_content(chapter_content)
@@ -169,6 +209,8 @@ class Markdowns2EpubConverter(EPUBConverter):
                     chapter_meta.chapter_name = chapter_path.stem
             if chapter_meta.chapter_order is None:
                 chapter_meta.chapter_order = self.total_chapter_count
+            if chapter_meta.section_order is None:
+                chapter_meta.section_order = len(self.section_dict)
             if chapter_meta.section_name:
                 self.add_chapter(chapter_meta.section_name, chapter_content, chapter_meta, chapter_path.parent)
             else:
@@ -187,7 +229,7 @@ class Markdowns2EpubConverter(EPUBConverter):
         else:
             section_list.sort(key=lambda x: x.section_order)
             for section in section_list:
-                if len(section.section_content) == 0:
+                if section.section_name == 'default':
                     continue
                 chapter_list = [(key, value) for key, value in section.section_content.items()]
                 chapter_list.sort(key=lambda x: x[0])
@@ -211,6 +253,10 @@ class Markdowns2EpubConverter(EPUBConverter):
         if not path.is_dir():
             raise ValueError("Path is not a directory")
         self.md_path = path
+        if (path / 'book_meta.json').exists():
+            with (path / 'book_meta.json').open('r') as f:
+                book_meta = json.load(f)
+            self.load_meta_from_file(BookMeta(**book_meta), path / 'book_meta.json')
         return self
 
     def _create_book(self) -> epub.EpubBook:
@@ -230,10 +276,10 @@ if __name__ == "__main__":
     config = ConverterConfig()
     converter = Markdowns2EpubConverter(config)
     converter.set_md_path(pathlib.Path('./test/'))
-    converter.set_title('Title')
-    converter.add_author('Author')
-    converter.set_description('Description')
-    converter.set_language('en')
-    converter.set_cover('cover.png', open('bg_ss01.png', 'rb').read())
+    # converter.set_title('Title')
+    # converter.add_author('Author')
+    # converter.set_description('Description')
+    # converter.set_language('en')
+    # converter.set_cover('cover.png', open('bg_ss01.png', 'rb').read())
     converter.convert().save_to_file(pathlib.Path('./test.epub'))
 
